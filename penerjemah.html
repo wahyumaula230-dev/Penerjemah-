@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Penerjemah Bahasa Isyarat AI dengan Suara</title>
+    <!-- Library MediaPipe via CDN -->
+    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
+    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
+    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
+    
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+        }
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .video-box {
+            position: relative;
+            margin-top: 20px;
+        }
+        video {
+            display: none;
+        }
+        canvas {
+            border-radius: 15px;
+            transform: scaleX(-1); /* Efek cermin */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+            background-color: #1e1e1e;
+        }
+        .output-panel {
+            margin-top: 20px;
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 640px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border: 1px solid #333;
+        }
+        .gesture-title {
+            font-size: 16px;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .gesture-name {
+            font-size: 42px;
+            font-weight: bold;
+            color: #00ffcc;
+            margin: 10px 0;
+            min-height: 55px;
+        }
+        .btn-speak {
+            background-color: #00ffcc;
+            color: #121212;
+            border: none;
+            padding: 12px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(0, 255, 204, 0.3);
+        }
+        .btn-speak:hover {
+            background-color: #00cc99;
+            transform: translateY(-2px);
+        }
+        .btn-speak:active {
+            transform: translateY(0);
+        }
+        .info-panel {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <h1>Penerjemah Bahasa Isyarat AI</h1>
+        <p>Gunakan tangan Anda untuk membentuk isyarat, lalu dengarkan suaranya.</p>
+
+        <div class="video-box">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="canvas" width="640" height="480"></canvas>
+        </div>
+
+        <div class="output-panel">
+            <div class="gesture-title">Arti Gerakan Terdeteksi</div>
+            <div id="gesture-output" class="gesture-name">-</div>
+            <button class="btn-speak" onclick="speakCurrentGesture()">🔊 Suarakan</button>
+        </div>
+
+        <div class="info-panel">
+            <strong>Panduan Gestur Didukung:</strong> Kepalan (A) | Telapak Terbuka (B) | Melengkung (C) | Dua Jari (V/Peace) | Ibu Jari & Kelingking (Call Me)
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const gestureOutput = document.getElementById('gesture-output');
+        
+        let lastSpokenText = "";
+        let currentDetectedGesture = "-";
+
+        // Fungsi Text-To-Speech untuk mengeluarkan suara dari komputer
+        function speakText(text) {
+            if (!text || text === "-" || text === "Mencari isyarat...") return;
+            
+            // Batasi agar tidak bersuara terus-menerus untuk kata yang sama dalam waktu singkat
+            if (window.speechSynthesis.speaking) return;
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'id-ID'; // Set suara dalam Bahasa Indonesia
+            utterance.rate = 1.0;     // Kecepatan bicara normal
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Fungsi tombol manual untuk bersuara
+        function speakCurrentGesture() {
+            speakText(currentDetectedGesture);
+        }
+
+        // Pengolahan data koordinat tangan dari AI MediaPipe
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const landmarks = results.multiHandLandmarks[i];
+                    
+                    // Gambar visualisasi kerangka di canvas
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 4});
+
+                    // Ambil status 5 ujung jari terbuka (1) atau tertutup (0)
+                    let fingersOpen = [];
+                    
+                    // Logika sederhana mendeteksi jari terbuka
+                    fingersOpen.push(landmarks[4].y < landmarks[3].y ? 1 : 0);   // Jempol
+                    fingersOpen.push(landmarks[8].y < landmarks[6].y ? 1 : 0);   // Telunjuk
+                    fingersOpen.push(landmarks[12].y < landmarks[10].y ? 1 : 0); // Tengah
+                    fingersOpen.push(landmarks[16].y < landmarks[14].y ? 1 : 0); // Manis
+                    fingersOpen.push(landmarks[20].y < landmarks[18].y ? 1 : 0); // Kelingking
+
+                    const totalFingers = fingersOpen.reduce((a, b) => a + b, 0);
+
+                    // ================= LOGIKA ARTI BAHASA ISYARAT =================
+                    let arti = "Mencari isyarat...";
+
+                    // 1. Isyarat Huruf A (Kepalan Tangan)
+                    if (totalFingers === 0) {
+                        arti = "Huruf A";
+                    } 
+                    // 2. Isyarat Huruf B / Halo (Semua Jari Tegak Terbuka)
+                    else if (totalFingers === 5) {
+                        arti = "Halo / Huruf B";
+                    } 
+                    // 3. Isyarat Huruf V / Peace (Hanya Telunjuk dan Tengah Terbuka)
+                    else if (fingersOpen[1] === 1 && fingersOpen[2] === 1 && totalFingers === 2) {
+                        arti = "Damai / Huruf V";
+                    } 
+                    // 4. Isyarat "Call Me" / Hubungi Saya (Hanya Jempol dan Kelingking Terbuka)
+                    else if (fingersOpen[0] === 1 && fingersOpen[4] === 1 && totalFingers === 2) {
+                        arti = "Hubungi Saya";
+                    }
+                    // 5. Isyarat Huruf C (Mengecek kelengkungan jarak telunjuk ke jempol secara horizontal)
+                    else if (Math.abs(landmarks[8].x - landmarks[4].x) > 0.15 && fingersOpen[1] === 1 && fingersOpen[2] === 1) {
+                        arti = "Huruf C";
+                    }
+                    // 6. Default jika hanya menghitung jumlah jari biasa
+                    else {
+                        arti = `Angka ${totalFingers}`;
+                    }
+
+                    currentDetectedGesture = arti;
+                    gestureOutput.innerText = currentDetectedGesture;
+
+                    // Mengeluarkan suara otomatis jika berganti gestur baru
+                    if (currentDetectedGesture !== lastSpokenText && currentDetectedGesture !== "Mencari isyarat...") {
+                        speakText(currentDetectedGesture);
+                        lastSpokenText = currentDetectedGesture;
+                    }
+                }
+            } else {
+                currentDetectedGesture = "-";
+                gestureOutput.innerText = "Tunjukkan tangan ke kamera...";
+            }
+            canvasCtx.restore();
+        }
+
+        // Konfigurasi Sistem MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://jsdelivr.net{file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1, // Fokus 1 tangan dahulu agar pembacaan lebih akurat
+            modelComplexity: 1,
+            minDetectionConfidence: 0.75,
+            minTrackingConfidence: 0.5
+        });
+        hands.onResults(onResults);
+
+        // Menyalakan Kamera Komputer
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        
+        camera.start().then(() => {
+            gestureOutput.innerText = "Kamera Aktif!";
+        }).catch(err => {
+            gestureOutput.innerText = "Error kamera!";
+            console.error(err);
+        });
+    </script>
+</body>
+</html>
